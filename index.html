@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>海的信箱 · 隔空手框海景</title>
+    <!-- 手势识别依赖（静态引入，避免CSP问题） -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.min.js"></script>
+    <!-- 添加CSP元标签，允许MediaPipe运行 -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://videos.pexels.com https://picsum.photos; img-src 'self' data: blob: https:; media-src 'self' blob: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net;">
+    <style>
+        :root {
+            --deep-ocean: #0a1929;
+            --mid-ocean: #1565c0;
+            --light-ocean: #42a5f5;
+            --glass-bg: rgba(255, 255, 255, 0.1);
+            --glass-border: rgba(255, 255, 255, 0.25);
+            --text-white: #ffffff;
+            --text-light: rgba(255, 255, 255, 0.8);
+            --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.25);
+            --radius-card: 12px;
+            --transition-smooth: 0.3s ease-out;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'PingFang SC', 'Noto Sans SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+            background: linear-gradient(135deg, #42a5f5 0%, #0d47a1 50%, #0a1929 100%);
+            min-height: 100vh;
+            overflow: hidden;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            -webkit-user-select: none;
+            color: #333;
+            position: relative;
+        }
+
+        .page {
+            position: fixed;
+            inset: 0;
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.8s ease, transform 0.8s ease;
+        }
+        .page-hidden {
+            opacity: 0;
+            pointer-events: none;
+            transform: scale(0.95);
+        }
+        .page-visible {
+            opacity: 1;
+            pointer-events: auto;
+            transform: scale(1);
+        }
+
+        /* 首页样式 */
+        #homePage {
+            flex-direction: column;
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            padding-bottom: 60px;
+            box-sizing: border-box;
+        }
+
+        .box-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 500px;
+            height: 400px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2;
+        }
+
+        .cards-stack {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            transform: rotate(-10deg);
+            z-index: 5;
+        }
+
+        .card-item {
+            position: absolute;
+            width: 200px;
+            height: 280px;
+            border-radius: 8px;
+            border: 2px solid rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            cursor: pointer;
+            transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1.2);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            will-change: transform;
+            opacity: 1 !important;
+            visibility: visible !important;
+        }
+
+        /* 自定义上传卡片样式 */
+        .card-item.add-card {
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px dashed rgba(255, 255, 255, 0.6);
+        }
+        .add-icon {
+            font-size: 48px;
+            color: rgba(255, 255, 255, 0.8);
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .card-poster {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 6px;
+            opacity: 0.75;
+            z-index: 1;
+        }
+
+        .card-item:nth-child(1) {
+            z-index: 1;
+            top: 0;
+            left: 0;
+            transform: translate(0, 0) rotate(-3deg);
+            background: rgba(187, 222, 251, 0.3);
+        }
+        .card-item:nth-child(2) {
+            z-index: 2;
+            top: 0;
+            left: 0;
+            transform: translate(40px, 20px) rotate(-1deg);
+            background: rgba(144, 202, 249, 0.3);
+        }
+        .card-item:nth-child(3) {
+            z-index: 3;
+            top: 0;
+            left: 0;
+            transform: translate(80px, 40px) rotate(1deg);
+            background: rgba(100, 181, 246, 0.3);
+            border-color: rgba(255, 255, 255, 0.95);
+        }
+        .card-item:nth-child(4) {
+            z-index: 4;
+            top: 0;
+            left: 0;
+            transform: translate(120px, 60px) rotate(3deg);
+            background: rgba(66, 165, 245, 0.3);
+        }
+        .card-item:nth-child(5) {
+            z-index: 5;
+            top: 0;
+            left: 0;
+            transform: translate(160px, 80px) rotate(5deg);
+            background: rgba(33, 150, 243, 0.3);
+        }
+        /* 自定义卡片放在最后 */
+        .card-item:nth-child(6) {
+            z-index: 6;
+            top: 0;
+            left: 0;
+            transform: translate(200px, 100px) rotate(7deg);
+        }
+
+        .card-item:hover {
+            transform: translate(calc(var(--translate-x) - 10px), calc(var(--translate-y) - 20px)) rotate(0deg) scale(1.05) !important;
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
+            z-index: 20 !important;
+            border-color: rgba(255, 255, 255, 1);
+        }
+        .card-item.active-card {
+            z-index: 25 !important;
+            transform: translate(calc(var(--translate-x) - 10px), calc(var(--translate-y) - 20px)) rotate(0deg) scale(1.05) !important;
+            border-color: rgba(255, 255, 255, 0.95) !important;
+            box-shadow: 0 20px 50px rgba(66, 165, 245, 0.5) !important;
+        }
+
+        .card-label {
+            position: relative;
+            z-index: 2;
+            font-size: 20px;
+            letter-spacing: 4px;
+            color: #fff;
+            font-weight: 500;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
+            text-align: center;
+        }
+
+        .copyright-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 50px;
+            background: rgba(10, 25, 41, 0.8);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            z-index: 10;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .creator-info {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 12px;
+            letter-spacing: 1px;
+        }
+        .social-icons {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+        }
+        .social-icon {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 18px;
+            cursor: pointer;
+            transition: color 0.3s ease;
+        }
+        .social-icon:hover {
+            color: #42a5f5;
+        }
+        .date-info {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 12px;
+            letter-spacing: 1px;
+        }
+
+        .modal-backdrop {
+            position: fixed; inset:0; z-index:40; background:rgba(0,0,0,0.55); backdrop-filter:blur(6px);
+            display: flex; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition:opacity 0.4s ease;
+        }
+        .modal-backdrop.open { opacity:1; pointer-events:auto; }
+        .modal-panel {
+            background:rgba(10,25,41,0.9); backdrop-filter:blur(22px); border-radius:22px; padding:30px 26px;
+            text-align:center; border:1px solid rgba(255,255,255,0.22); box-shadow:0 24px 60px rgba(0,0,0,0.45);
+            display:flex; flex-direction:column; gap:18px; animation:modalSlideUp 0.5s ease;
+        }
+        @keyframes modalSlideUp { from{transform:translateY(45px); opacity:0;} to{transform:translateY(0); opacity:1;} }
+        .modal-btn {
+            width:210px; height:58px; border-radius:30px; border:1px solid rgba(255,255,255,0.28);
+            background:rgba(255,255,255,0.1); color:#fff; font-size:1.05rem; letter-spacing:0.06em;
+            cursor:pointer; transition:var(--transition-smooth); display:flex; align-items:center; justify-content:center; gap:10px;
+        }
+        .modal-btn:hover { background:var(--mid-ocean); border-color:transparent; transform:scale(1.05); box-shadow:0 8px 28px rgba(21,101,192,0.45); }
+        .modal-close { background:none; border:none; color:rgba(255,255,255,0.7); cursor:pointer; font-size:0.88rem; margin-top:6px; }
+
+        /* 交互页面核心样式 */
+        #interactPage { flex-direction:column; background:#000; }
+        /* 摄像头关闭：高颜值海洋渐变背景 */
+        #interactPage.ocean-bg {
+            background: linear-gradient(160deg, #051a33 0%, #0b3b6b 40%, #125799 70%, #1a72c2 100%);
+            background-attachment: fixed;
+        }
+        .interact-canvas-wrap { position:absolute; inset:0; z-index:1; }
+        #outputCanvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+        .gesture-hint-bar {
+            position:absolute; top:18px; left:50%; transform:translateX(-50%); z-index:20;
+            background:rgba(0,0,0,0.5); backdrop-filter:blur(10px); border-radius:20px; padding:8px 20px;
+            font-size:0.82rem; color:rgba(255,255,255,0.85); letter-spacing:0.05em; text-align:center;
+            pointer-events:none; border:1px solid rgba(255,255,255,0.18);
+        }
+        .ctrl-btns { 
+            position:absolute; right:18px; bottom:210px; 
+            display:flex; flex-direction:column; gap:12px; z-index:20; 
+        }
+        .ctrl-btn {
+            width:70px; height:56px; border-radius:8px; 
+            background:rgba(255,255,255,0.35); backdrop-filter:blur(10px);
+            border:2px solid rgba(255,255,255,0.5); color:#fff; 
+            font-size:0.85rem; cursor:pointer;
+            display:flex; align-items:center; justify-content:center; flex-direction:column; gap:2px;
+            transition:var(--transition-smooth);
+        }
+        .ctrl-btn:hover {
+            background:rgba(66, 165, 245, 0.5);
+            border-color:rgba(255,255,255,0.8);
+        }
+        .pickup-btn {
+            position:absolute; left:18px; bottom:190px; z-index:20; 
+            background:rgba(255,255,255,0.15); backdrop-filter:blur(10px);
+            border:1px solid rgba(255,255,255,0.35); color:#fff; padding:11px 20px; border-radius:26px;
+            font-size:0.88rem; cursor:pointer; letter-spacing:0.05em; transition:var(--transition-smooth);
+        }
+        .poem-overlay {
+            position:absolute; z-index:25; top:50%; left:50%; transform:translate(-50%, -50%);
+            text-align:center; pointer-events:none; opacity:0; transition:opacity 1.3s ease;
+            background:rgba(0,0,0,0.55); backdrop-filter:blur(12px); border-radius:22px; padding:22px 30px;
+            max-width:82%; border:1px solid rgba(255,255,255,0.22);
+        }
+        .poem-overlay.show { opacity:1; }
+        .poem-overlay p { color:#fff; font-style:italic; font-size:1.1rem; letter-spacing:0.08em; line-height:1.8; font-weight:300; }
+
+        .input-bar {
+            position:absolute; bottom:35px; left:50%; transform:translateX(-50%); z-index:20;
+            display:flex; gap:10px; align-items:center; background:rgba(0,0,0,0.4); backdrop-filter:blur(16px);
+            border-radius:30px; padding:8px 10px 8px 20px; border:1px solid rgba(255,255,255,0.22);
+            width:80%; max-width:600px; min-width:320px;
+        }
+        .input-bar input { flex:1; background:transparent; border:none; outline:none; color:#fff; font-size:0.95rem; letter-spacing:0.05em; min-width:0; }
+        .input-bar input::placeholder { color:rgba(255,255,255,0.55); font-weight:300; }
+        .input-bar .send-btn {
+            width:42px; height:42px; border-radius:50%; background:var(--mid-ocean); border:none; color:#fff;
+            font-size:1.05rem; cursor:pointer; flex-shrink:0; transition:var(--transition-smooth);
+            display:flex; align-items:center; justify-content:center;
+        }
+        /* 关键词栏：默认隐藏，仅写诗时显示 */
+        .keywords-bar {
+            position:absolute; bottom:90px; left:50%; transform:translateX(-50%); z-index:20;
+            display:flex; align-items:center; gap:10px; width:82%; max-width:560px; min-width:280px;
+            background:rgba(0,0,0,0.35); backdrop-filter:blur(12px); border-radius:28px; padding:8px 10px 8px 16px;
+            border:1px solid rgba(255,255,255,0.2);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+        .keywords-bar.show {
+            opacity: 1;
+            visibility: visible;
+        }
+        .keywords-row { display:flex; flex-wrap:nowrap; gap:7px; overflow:hidden; flex:1; align-items:center; }
+        .keyword-tag {
+            background:rgba(255,255,255,0.14); backdrop-filter:blur(6px); border:1px solid rgba(255,255,255,0.2);
+            border-radius:16px; padding:6px 13px; font-size:0.8rem; color:rgba(255,255,255,0.9);
+            cursor:pointer; transition:var(--transition-smooth); white-space:nowrap; flex-shrink:0;
+        }
+        .keyword-tag.selected {
+            background:rgba(66, 165, 245, 0.5);
+            border-color:rgba(100, 200, 255, 0.8);
+        }
+        .refresh-keywords-btn {
+            width:38px; height:38px; border-radius:50%; background:rgba(255,255,255,0.16); backdrop-filter:blur(8px);
+            border:1px solid rgba(255,255,255,0.3); color:#fff; font-size:1.3rem; cursor:pointer;
+            flex-shrink:0; display:flex; align-items:center; justify-content:center; transition:background 0.3s ease, transform 0.3s ease;
+        }
+        .refresh-keywords-btn:hover {
+            transform: rotate(360deg);
+        }
+
+        .loading-hint {
+            position:absolute; top:50%; left:50%; transform:translate(-50%, -50%);
+            color:#fff; font-size:1rem; letter-spacing:2px;
+            z-index:15;
+        }
+
+        /* 隐藏的文件输入框 */
+        #fileInput {
+            display: none;
+        }
+
+        @media (max-width: 600px) {
+            .box-container{width:400px; height:350px;}
+            .card-item{width:150px; height:200px;}
+            .card-item:nth-child(1) { transform: translate(0, 0) rotate(-3deg); }
+            .card-item:nth-child(2) { transform: translate(30px, 15px) rotate(-1deg); }
+            .card-item:nth-child(3) { transform: translate(60px, 30px) rotate(1deg); }
+            .card-item:nth-child(4) { transform: translate(90px, 45px) rotate(3deg); }
+            .card-item:nth-child(5) { transform: translate(120px, 60px) rotate(5deg); }
+            .card-item:nth-child(6) { transform: translate(150px, 75px) rotate(7deg); }
+            .card-label { font-size: 16px; }
+            .add-icon { font-size: 36px; }
+            .copyright-bar { height: 45px; padding: 0 10px; }
+            .social-icons { gap: 12px; }
+            .social-icon { font-size: 16px; }
+            .creator-info, .date-info { font-size: 10px; }
+            .ctrl-btn { width: 60px; height: 48px; font-size: 0.75rem; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="page page-visible" id="homePage">
+    <div class="box-container">
+        <div class="cards-stack" id="cardsStack"></div>
+    </div>
+
+    <div class="copyright-bar">
+        <div class="creator-info">All Rights Reserved © Kong Xiangmo</div>
+        <div class="social-icons">
+            <span class="social-icon">📺</span>
+            <span class="social-icon">🎵</span>
+            <span class="social-icon">📱</span>
+            <span class="social-icon">📷</span>
+            <span class="social-icon">🎶</span>
+        </div>
+        <div class="date-info" id="realTimeDate">2025 SPRING</div>
+    </div>
+</div>
+
+<div class="modal-backdrop" id="modalBackdrop">
+    <div class="modal-panel">
+        <h3 id="modalTitle" style="color:#fff; font-weight:400;">海景</h3>
+        <button class="modal-btn" id="btnBottle">💌 心事漂流瓶</button>
+        <button class="modal-btn" id="btnPoetry">✍️ 海浪写诗</button>
+        <button class="modal-close" id="modalClose">返回</button>
+    </div>
+</div>
+
+<div class="page page-hidden" id="interactPage">
+    <div class="interact-canvas-wrap">
+        <canvas id="outputCanvas"></canvas>
+        <div class="loading-hint" id="loadingHint">正在启动摄像头...</div>
+    </div>
+    <div class="gesture-hint-bar" id="gestureHint">🤌 单/双手拇指+食指张开框选</div>
+    <div class="ctrl-btns">
+        <button class="ctrl-btn" id="btnBack">←<br>返回</button>
+        <button class="ctrl-btn" id="btnSwitch">🔄<br>切换</button>
+        <button class="ctrl-btn" id="btnScreenshot">📷<br>截图</button>
+        <button class="ctrl-btn" id="btnCam">📹<br>摄像</button>
+    </div>
+    <button class="pickup-btn" id="pickupBtn">🐚 捡一个惊喜瓶</button>
+    <div class="poem-overlay" id="poemOverlay"><p id="poemText"></p></div>
+    <!-- 关键词栏（写诗模式显示） -->
+    <div class="keywords-bar" id="keywordsBar">
+        <div class="keywords-row" id="keywordsRow"></div>
+        <button class="refresh-keywords-btn" id="refreshBtn">↻</button>
+    </div>
+    <!-- 心事输入框 -->
+    <div class="input-bar">
+        <input type="text" id="inputText" placeholder="写下你的心事...">
+        <button class="send-btn" id="sendBtn">➤</button>
+    </div>
+</div>
+
+<!-- 隐藏的文件输入框 -->
+<input type="file" id="fileInput" accept="image/*,video/*" capture="environment">
+
+<!-- 视频元素（隐藏但全屏渲染） -->
+<video id="camVideo" playsinline autoplay muted style="display:none;"></video>
+<video id="seaVideo" loop muted playsinline style="display:none;"></video>
+<!-- 用户上传的图片 -->
+<img id="userImage" style="display:none;">
+
+<script>
+// 视频配置（Pexels官方CDN，永久有效）
+const BEACH_VIDEOS = [
+    { name: '假日海滩', src: 'https://videos.pexels.com/video-files/3049739/3049739-hd_1280_720_25fps.mp4', poster: 'https://picsum.photos/id/1002/400/600' },
+    { name: '三亚', src: 'https://videos.pexels.com/video-files/1409899/1409899-hd_1280_720_25fps.mp4', poster: 'https://picsum.photos/id/1003/400/600' },
+    { name: '万宁', src: 'https://videos.pexels.com/video-files/2099777/2099777-hd_1280_720_25fps.mp4', poster: 'https://picsum.photos/id/1004/400/600' },
+    { name: '椰林', src: 'https://videos.pexels.com/video-files/1526909/1526909-hd_1280_720_25fps.mp4', poster: 'https://picsum.photos/id/1005/400/600' },
+    { name: '椰树海滩', src: 'https://videos.pexels.com/video-files/1430672/1430672-hd_1280_720_25fps.mp4', poster: 'https://picsum.photos/id/1006/400/600' },
+    { name: '我的相册', src: 'custom', poster: '' }
+];
+
+// 关键词-诗句精准匹配
+const KEYWORD_POEMS = {
+    '夏天': "晚风吻尽荷花叶，让我醉倒在海边",
+    '海风': "海的温柔，是揉碎的月光，落在你掌心",
+    '日落': "黄昏把海揉成橘色，像我揉进怀里的温柔",
+    '星空': "星星掉进海里，变成浪花，我掉进你眼里",
+    '云朵': "椰子树的影子晃呀晃，把烦恼都晃成了云",
+    '月亮': "听海的声音，数着浪花，日子就慢下来了",
+    '温柔': "贝壳里的风，是大海偷偷藏的温柔",
+    '治愈': "你来人间一趟，要和心上人看看海",
+    '快乐': "浪花数了365朵，每一朵都在说：你很棒呀",
+    '孤独': "你看这海，从来不会因为谁，停止翻涌",
+    '自由': "海的尽头是天，你的尽头是无限",
+    '勇气': "越过山丘，才发现海在等候",
+    '成长': "船锚沉底，才能稳住方向；你沉淀，才能成长",
+    '遇见': "潮水退去时，正是捡拾贝壳的最好时机",
+    '思念': "海平线很远，但远不过我想你的距离",
+    '晚风': "海风偷吻海浪，我偷吻你的侧脸",
+    '咖啡': "橘子味的海风，会吹散所有不开心",
+    '旅行': "每一次划桨，都是向海平线的靠近",
+    '音乐': "听，海在唱歌，是你小时候听过的那首歌",
+    '遗憾': "那些没说出口的话，就让海带走吧",
+    '和解': "海接纳所有河流，不管清浊，你也该接纳自己",
+    '告别': "漂流瓶漂向远方，是新的开始",
+    '雨季': "把烦恼写在沙滩上，涨潮时，大海会帮你擦掉",
+    '书店': "有些故事沉入海底，长成了珊瑚，温柔又坚韧"
+};
+
+const BOTTLES = [
+    "今天的海风是橘子味的，像小时候的橘子汽水",
+    "海浪一遍遍拍岸，像在说：慢慢来，都会好的",
+    "捡了一把贝壳，每一个都藏着不同的海风",
+    "沙滩上的小螃蟹横着走，像在说：换个角度，路就宽了",
+    "椰子树的影子晃呀晃，把烦恼都晃成了云",
+    "刚才一只海鸥偷了我的面包，还得意地叫了一声",
+    "把烦恼写在沙滩上，涨潮时，大海会帮你擦掉",
+    "海风说：别急，美好都在来的路上，只是走了水路",
+    "浪花数了365朵，每一朵都在说：你很棒呀",
+    "寄居蟹换了新家，你也该给心事找个新去处",
+    "黄昏的海，把所有遗憾都揉成了温柔的橘色",
+    "听，海在唱歌，是你小时候听过的那首歌",
+    "潮水退去时，正是捡拾贝壳的最好时机",
+    "大海没有穷尽，你的快乐也没有",
+    "踩在沙滩上，像踩在云朵里，软乎乎的"
+];
+
+const ALL_KEYWORDS = Object.keys(KEYWORD_POEMS);
+const $ = s => document.querySelector(s);
+const canvas = $('#outputCanvas');
+const ctx = canvas.getContext('2d');
+const camVideo = $('#camVideo');
+const seaVideo = $('#seaVideo');
+const userImage = $('#userImage');
+const loadingHint = $('#loadingHint');
+const interactPage = $('#interactPage');
+const inputText = $('#inputText');
+const keywordsBar = $('#keywordsBar');
+const keywordsRow = $('#keywordsRow');
+const refreshBtn = $('#refreshBtn');
+const fileInput = $('#fileInput');
+const gestureHint = $('#gestureHint');
+
+let selectedIdx = 2;
+let isCamReady = false;
+let selectRect = null;
+let mediaStream = null;
+let handsModel = null;
+let isModelLoaded = false;
+let currentMode = "mood";
+let selectedKeywords = new Set();
+let customContentType = null;
+let customContentURL = null;
+
+// 生成首页卡片
+function buildCards(){
+    $('#cardsStack').innerHTML = '';
+    BEACH_VIDEOS.forEach((v,i)=>{
+        const div = document.createElement('div');
+        div.className = 'card-item';
+        div.dataset.idx = i;
+        div.style.setProperty('--translate-x', `${i*40}px`);
+        div.style.setProperty('--translate-y', `${i*20}px`);
+        
+        if(v.src === 'custom'){
+            div.classList.add('add-card');
+            div.innerHTML = '<div class="add-icon">+</div>';
+            div.onclick = ()=> fileInput.click();
+        }else{
+            div.innerHTML = `<img src="${v.poster}" class="card-poster"><div class="card-label">${v.name}</div>`;
+        }
+        
+        $('#cardsStack').appendChild(div);
+    });
+    $('#cardsStack').children[2].classList.add('active-card');
+}
+
+// 处理文件上传
+fileInput.onchange = (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    
+    if(customContentURL) URL.revokeObjectURL(customContentURL);
+    customContentURL = URL.createObjectURL(file);
+    
+    if(file.type.startsWith('image/')){
+        customContentType = 'image';
+        userImage.src = customContentURL;
+    }else if(file.type.startsWith('video/')){
+        customContentType = 'video';
+        seaVideo.src = customContentURL;
+    }
+    
+    selectedIdx = BEACH_VIDEOS.length - 1;
+    [...$('#cardsStack').children].forEach(c=>c.classList.remove('active-card'));
+    $('#cardsStack').children[selectedIdx].classList.add('active-card');
+    $('#modalTitle').textContent = '我的相册';
+    $('#modalBackdrop').classList.add('open');
+};
+
+// 填充随机关键词
+function fillRandomKeywords(){
+    keywordsRow.innerHTML = '';
+    selectedKeywords.clear();
+    const shuffled = [...ALL_KEYWORDS].sort(() => 0.5 - Math.random());
+    const selected = shuffled.slice(0, 8);
+    
+    selected.forEach(word=>{
+        const tag = document.createElement('span');
+        tag.className = 'keyword-tag';
+        tag.innerText = word;
+        tag.onclick = ()=>{
+            tag.classList.toggle('selected');
+            if(tag.classList.contains('selected')){
+                selectedKeywords.add(word);
+            }else{
+                selectedKeywords.delete(word);
+            }
+            inputText.value = Array.from(selectedKeywords).join('、');
+        };
+        keywordsRow.appendChild(tag);
+    });
+}
+
+// 普通卡片点击弹窗
+$('#cardsStack').onclick = e => {
+    const item = e.target.closest('.card-item:not(.add-card)');
+    if(!item) return;
+    [...$('#cardsStack').children].forEach(c=>c.classList.remove('active-card'));
+    item.classList.add('active-card');
+    selectedIdx = +item.dataset.idx;
+    $('#modalTitle').textContent = BEACH_VIDEOS[selectedIdx].name;
+    $('#modalBackdrop').classList.add('open');
+};
+
+// 按钮事件
+$('#btnBottle').onclick = ()=> {
+    currentMode = "mood";
+    keywordsBar.classList.remove('show');
+    inputText.placeholder = "写下你的心事...";
+    start();
+};
+$('#btnPoetry').onclick = ()=> {
+    currentMode = "poetry";
+    keywordsBar.classList.add('show');
+    inputText.placeholder = "点击关键词或输入写诗主题...";
+    fillRandomKeywords();
+    start();
+};
+$('#modalClose').onclick = ()=> {
+    $('#modalBackdrop').classList.remove('open');
+    keywordsBar.classList.remove('show');
+    currentMode = "mood";
+};
+$('#btnBack').onclick = goHome;
+$('#btnSwitch').onclick = ()=>{ 
+    selectedIdx=(selectedIdx+1)%BEACH_VIDEOS.length; 
+    if(BEACH_VIDEOS[selectedIdx].src === 'custom'){
+        selectedIdx=(selectedIdx+1)%BEACH_VIDEOS.length;
+    }
+    loadContent(); 
+};
+$('#pickupBtn').onclick = ()=> {
+    currentMode = "mood";
+    keywordsBar.classList.remove('show');
+    showText(BOTTLES[Math.floor(Math.random()*BOTTLES.length)]);
+};
+$('#btnCam').onclick = toggleCamera;
+refreshBtn.onclick = fillRandomKeywords;
+
+// 加载内容
+function loadContent(){
+    const content = BEACH_VIDEOS[selectedIdx];
+    if(content.src === 'custom'){
+        if(customContentType === 'video'){
+            seaVideo.src = customContentURL;
+            seaVideo.load();
+            seaVideo.play().catch(()=>{});
+        }
+    }else{
+        customContentType = 'video';
+        seaVideo.src = content.src;
+        seaVideo.load();
+        seaVideo.play().catch((e)=>{
+            setTimeout(()=>{
+                selectedIdx=(selectedIdx+1)%BEACH_VIDEOS.length;
+                if(BEACH_VIDEOS[selectedIdx].src === 'custom'){
+                    selectedIdx=(selectedIdx+1)%BEACH_VIDEOS.length;
+                }
+                loadContent();
+            }, 1000);
+        });
+    }
+}
+
+// 进入交互页面
+function start(){
+    $('#homePage').classList.add('page-hidden');
+    $('#interactPage').classList.remove('page-hidden');
+    $('#modalBackdrop').classList.remove('open');
+    isCamReady = false;
+    selectRect = null;
+    loadingHint.style.display = 'block';
+    loadingHint.textContent = "正在启动摄像头...";
+    loadContent();
+    startCamera();
+    initHandGesture();
+    requestAnimationFrame(render);
+}
+
+// 返回首页
+function goHome(){
+    $('#homePage').classList.remove('page-hidden');
+    $('#interactPage').classList.add('page-hidden');
+    stopCamera();
+    isCamReady = false;
+    selectRect = null;
+    keywordsBar.classList.remove('show');
+    currentMode = "mood";
+    selectedKeywords.clear();
+    inputText.value = '';
+    if(handsModel) handsModel.close();
+    isModelLoaded = false;
+}
+
+// 启动摄像头
+async function startCamera(){
+    try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user', width:640, height:480 }
+        });
+        camVideo.srcObject = mediaStream;
+        await camVideo.play();
+        isCamReady = true;
+        interactPage.classList.remove('ocean-bg');
+        loadingHint.style.display = 'none';
+        $('#btnCam').textContent = '📹\n摄像';
+        gestureHint.textContent = "🤌 单/双手拇指+食指张开框选";
+    } catch(e) {
+        console.error("摄像头启动失败:", e);
+        loadingHint.textContent = "摄像头权限异常，手势识别无法使用";
+        setTimeout(()=>loadingHint.style.display='none',3000);
+        gestureHint.textContent = "⚠️ 摄像头未开启，无法使用手势功能";
+    }
+}
+
+// 关闭摄像头
+function stopCamera(){
+    if(mediaStream){
+        mediaStream.getTracks().forEach(track => track.stop());
+        mediaStream = null;
+    }
+    camVideo.srcObject = null;
+    isCamReady = false;
+    interactPage.classList.add('ocean-bg');
+    $('#btnCam').textContent = '🚫\n关闭';
+    selectRect = null;
+}
+
+// 切换摄像头状态
+function toggleCamera(){
+    if(isCamReady){
+        stopCamera();
+    }else{
+        startCamera();
+    }
+}
+
+// 手势识别初始化（CSP兼容版）
+function initHandGesture(){
+    if (typeof Hands === 'undefined') {
+        console.error("MediaPipe Hands 未加载");
+        gestureHint.textContent = "⚠️ 手势模型加载失败，请刷新页面";
+        return;
+    }
+    
+    loadingHint.textContent = "正在加载手势模型...";
+    
+    // 直接使用全局Hands对象，不使用动态加载
+    handsModel = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`
+    });
+    
+    handsModel.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 0,
+        minDetectionConfidence: 0.2,
+        minTrackingConfidence: 0.2
+    });
+    
+    handsModel.onResults(onHandResults);
+    
+    // 手动初始化模型
+    handsModel.initialize().then(() => {
+        console.log("手势模型加载成功");
+        isModelLoaded = true;
+        if(isCamReady) {
+            loadingHint.style.display = 'none';
+            gestureHint.textContent = "🤌 单/双手拇指+食指张开框选";
+            
+            // 启动摄像头输入
+            const camera = new Camera(camVideo, {
+                onFrame: async () => {
+                    if(isCamReady && handsModel && isModelLoaded) {
+                        try {
+                            await handsModel.send({ image: camVideo });
+                        } catch(e) {
+                            console.error("手势处理错误:", e);
+                        }
+                    }
+                },
+                width: 640,
+                height: 480
+            });
+            camera.start();
+        }
+    }).catch((e) => {
+        console.error("手势模型加载失败:", e);
+        gestureHint.textContent = "⚠️ 手势模型加载失败，请刷新页面";
+    });
+}
+
+// 处理手部关键点
+function onHandResults(results){
+    if(!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+        selectRect = null;
+        return;
+    }
+
+    const mapPoint = (pt) => ({
+        x: (1 - pt.x) * canvas.width,
+        y: pt.y * canvas.height
+    });
+
+    // 单只手框选
+    if(results.multiHandLandmarks.length === 1){
+        const landmarks = results.multiHandLandmarks[0];
+        const thumbTip = landmarks[4];
+        const indexTip = landmarks[8];
+        
+        const fingerDist = Math.hypot(
+            thumbTip.x - indexTip.x,
+            thumbTip.y - indexTip.y
+        );
+
+        if(fingerDist > 0.02){
+            const thumbPoint = mapPoint(thumbTip);
+            const indexPoint = mapPoint(indexTip);
+            
+            selectRect = {
+                x: Math.min(thumbPoint.x, indexPoint.x) / canvas.width,
+                y: Math.min(thumbPoint.y, indexPoint.y) / canvas.height,
+                w: Math.abs(thumbPoint.x - indexPoint.x) / canvas.width,
+                h: Math.abs(thumbPoint.y - indexPoint.y) / canvas.height
+            };
+        }else{
+            selectRect = null;
+        }
+    }
+    // 两只手框选
+    else if(results.multiHandLandmarks.length === 2){
+        const hand1 = results.multiHandLandmarks[0];
+        const hand2 = results.multiHandLandmarks[1];
+        
+        const points = [
+            hand1[4], hand1[8],
+            hand2[4], hand2[8]
+        ].map(mapPoint);
+        
+        const minX = Math.min(...points.map(p => p.x));
+        const maxX = Math.max(...points.map(p => p.x));
+        const minY = Math.min(...points.map(p => p.y));
+        const maxY = Math.max(...points.map(p => p.y));
+        
+        const width = maxX - minX;
+        const height = maxY - minY;
+        
+        if(width > 20 && height > 20){
+            selectRect = {
+                x: minX / canvas.width,
+                y: minY / canvas.height,
+                w: width / canvas.width,
+                h: height / canvas.height
+            };
+        }else{
+            selectRect = null;
+        }
+    }
+}
+
+// 核心渲染逻辑
+function render(){
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // 绘制摄像头画面
+    if(isCamReady && camVideo.readyState >= 2){
+        ctx.save();
+        ctx.translate(canvas.width,0);
+        ctx.scale(-1,1);
+        ctx.drawImage(camVideo,0,0,canvas.width,canvas.height);
+        ctx.restore();
+    }
+
+    // 框选区域裁剪显示内容
+    if(selectRect && selectRect.w > 0.01 && selectRect.h > 0.01){
+        const px = selectRect.x * canvas.width;
+        const py = selectRect.y * canvas.height;
+        const pw = selectRect.w * canvas.width;
+        const ph = selectRect.h * canvas.height;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(px, py, pw, ph);
+        ctx.clip();
+        
+        if(customContentType === 'image' && userImage.complete){
+            ctx.drawImage(userImage, 0, 0, canvas.width, canvas.height);
+        }else if(customContentType === 'video' && seaVideo.readyState >= 3){
+            ctx.drawImage(seaVideo, 0, 0, canvas.width, canvas.height);
+        }
+        
+        ctx.restore();
+
+        // 完全透明边框
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(px, py, pw, ph);
+    }
+
+    requestAnimationFrame(render);
+}
+
+// 弹出文案
+function showText(t){
+    let finalText = t;
+    
+    if(currentMode === "poetry"){
+        const input = inputText.value.trim();
+        if(input){
+            const inputKeywords = input.split(/[、,，\s]+/);
+            const matchedPoems = [];
+            
+            inputKeywords.forEach(keyword => {
+                keyword = keyword.trim();
+                if(KEYWORD_POEMS[keyword]){
+                    matchedPoems.push(`【${keyword}】${KEYWORD_POEMS[keyword]}`);
+                }
+            });
+            
+            if(matchedPoems.length > 0){
+                finalText = matchedPoems.join('\n\n');
+            }else{
+                finalText = input;
+            }
+        }
+    }
+    
+    $('#poemText').innerText = finalText;
+    $('#poemOverlay').classList.add('show');
+    setTimeout(()=>$('#poemOverlay').classList.remove('show'),4000);
+}
+
+// 发送按钮事件
+$('#sendBtn').onclick = ()=>{
+    const val = inputText.value.trim();
+    if(val){
+        showText(val);
+        inputText.value = '';
+        selectedKeywords.clear();
+        [...keywordsRow.children].forEach(tag=>tag.classList.remove('selected'));
+    }
+};
+inputText.onkeydown = e=>{
+    if(e.key === 'Enter') $('#sendBtn').click();
+};
+
+// 页面初始化
+buildCards();
+</script>
+</body>
+</html>
