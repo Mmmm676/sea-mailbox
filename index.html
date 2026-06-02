@@ -540,6 +540,10 @@ let customContentURL = null;
 // 性能优化：帧节流
 let frameCount = 0;
 let isRunning = false;
+// 摄像头绘制参数（保持原始比例不变形）
+let camDrawParams = { offsetX: 0, offsetY: 0, width: 0, height: 0, scale: 1 };
+// 屏幕像素比（用于超清截图）
+const dpr = window.devicePixelRatio || 1;
 
 // 生成首页卡片
 function buildCards(){
@@ -675,11 +679,21 @@ $('#btnCam').onclick = toggleCamera;
 // 刷新关键词按钮
 refreshBtn.onclick = fillRandomKeywords;
 
-// 截图功能
+// 超清截图功能
 $('#btnScreenshot').onclick = ()=>{
+    // 创建临时canvas用于导出高清图片
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    
+    // 复制当前canvas内容
+    tempCtx.drawImage(canvas, 0, 0);
+    
+    // 导出高清PNG
     const link = document.createElement('a');
     link.download = '海的信箱-' + new Date().getTime() + '.png';
-    link.href = canvas.toDataURL('image/png');
+    link.href = tempCanvas.toDataURL('image/png', 1.0); // 最高质量
     link.click();
 };
 
@@ -793,7 +807,38 @@ function toggleCamera(){
     }
 }
 
-// ---------- 核心：完美贴合手指的手势识别 ----------
+// ---------- 核心：修复比例变形+超清分辨率 ----------
+// 计算摄像头绘制参数（保持原始4:3比例，不变形）
+function updateCamDrawParams() {
+    if(!camVideo.videoWidth || !camVideo.videoHeight) return;
+    
+    // 摄像头原始比例（通常是4:3）
+    const videoRatio = camVideo.videoWidth / camVideo.videoHeight;
+    // 画布CSS尺寸
+    const canvasCssWidth = canvas.clientWidth;
+    const canvasCssHeight = canvas.clientHeight;
+    const canvasRatio = canvasCssWidth / canvasCssHeight;
+    
+    if(videoRatio > canvasRatio) {
+        // 摄像头更宽，高度填满，宽度裁剪
+        camDrawParams.height = canvasCssHeight;
+        camDrawParams.width = canvasCssHeight * videoRatio;
+        camDrawParams.offsetX = (canvasCssWidth - camDrawParams.width) / 2;
+        camDrawParams.offsetY = 0;
+    } else {
+        // 摄像头更高，宽度填满，高度裁剪
+        camDrawParams.width = canvasCssWidth;
+        camDrawParams.height = canvasCssWidth / videoRatio;
+        camDrawParams.offsetX = 0;
+        camDrawParams.offsetY = (canvasCssHeight - camDrawParams.height) / 2;
+    }
+    
+    // 计算缩放比例（用于坐标映射）
+    camDrawParams.scaleX = camDrawParams.width / camVideo.videoWidth;
+    camDrawParams.scaleY = camDrawParams.height / camVideo.videoHeight;
+}
+
+// 初始化手势模型
 async function initHandGesture(){
     if (typeof Hands === 'undefined') {
         console.error("MediaPipe Hands 未加载");
@@ -832,7 +877,7 @@ async function initHandGesture(){
     }
 }
 
-// 处理手部关键点：完美贴合手指
+// 处理手部关键点：修复坐标映射（适配比例调整）
 function onHandResults(results){
     // 空值保护，防止闪退
     if(!results || !results.multiHandLandmarks) {
@@ -846,11 +891,21 @@ function onHandResults(results){
         return;
     }
 
-    // 坐标映射：将MediaPipe归一化坐标转换为画布坐标
-    const mapPoint = (pt) => ({
-        x: (1 - pt.x) * canvas.width,
-        y: pt.y * canvas.height
-    });
+    // 坐标映射：将MediaPipe归一化坐标转换为画布坐标（考虑比例和偏移）
+    const mapPoint = (pt) => {
+        // 先转换为摄像头像素坐标
+        let videoX = pt.x * camVideo.videoWidth;
+        let videoY = pt.y * camVideo.videoHeight;
+        
+        // 再转换为画布像素坐标
+        let canvasX = videoX * camDrawParams.scaleX + camDrawParams.offsetX;
+        let canvasY = videoY * camDrawParams.scaleY + camDrawParams.offsetY;
+        
+        // 镜像翻转
+        canvasX = canvas.clientWidth - canvasX;
+        
+        return { x: canvasX, y: canvasY };
+    };
 
     // 情况1：单只手框选（完美贴合）
     if(hands.length === 1){
@@ -869,7 +924,7 @@ function onHandResults(results){
             const thumbPoint = mapPoint(thumbTip);
             const indexPoint = mapPoint(indexTip);
             
-            // 关键优化：放大系数从2倍改为1.2倍，完美贴合手指
+            // 完美贴合手指
             const centerX = (thumbPoint.x + indexPoint.x) / 2;
             const centerY = (thumbPoint.y + indexPoint.y) / 2;
             const width = Math.abs(thumbPoint.x - indexPoint.x) * 1.2;
@@ -878,8 +933,8 @@ function onHandResults(results){
             selectRect = {
                 x: Math.max(0, centerX - width/2),
                 y: Math.max(0, centerY - height/2),
-                w: Math.min(canvas.width, width),
-                h: Math.min(canvas.height, height)
+                w: Math.min(canvas.clientWidth, width),
+                h: Math.min(canvas.clientHeight, height)
             };
         }else{
             selectRect = null;
@@ -919,21 +974,26 @@ function onHandResults(results){
     }
 }
 
-// 主循环：丝滑流畅
+// 主循环：超清分辨率+完美比例
 async function mainLoop() {
     if(!isRunning) return;
     
     try {
-        // 调整画布大小
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+        // 设置canvas实际像素尺寸为物理像素（超清）
+        canvas.width = canvas.clientWidth * dpr;
+        canvas.height = canvas.clientHeight * dpr;
+        // 缩放上下文，确保绘制内容正确
+        ctx.scale(dpr, dpr);
         
-        // 1. 绘制摄像头画面（镜像翻转，符合直觉）
+        // 更新摄像头绘制参数
+        updateCamDrawParams();
+        
+        // 1. 绘制摄像头画面（保持原始4:3比例，不变形）
         if(isCamReady && camVideo.readyState >= 2){
             ctx.save();
-            ctx.translate(canvas.width, 0);
-            ctx.scale(-1, 1);
-            ctx.drawImage(camVideo, 0, 0, canvas.width, canvas.height);
+            ctx.drawImage(camVideo, 
+                camDrawParams.offsetX, camDrawParams.offsetY, 
+                camDrawParams.width, camDrawParams.height);
             ctx.restore();
         }
         
@@ -952,9 +1012,9 @@ async function mainLoop() {
             
             // 根据内容类型绘制
             if(customContentType === 'image' && userImage.complete){
-                ctx.drawImage(userImage, 0, 0, canvas.width, canvas.height);
+                ctx.drawImage(userImage, 0, 0, canvas.clientWidth, canvas.clientHeight);
             }else if(customContentType === 'video' && seaVideo.readyState >= 3){
-                ctx.drawImage(seaVideo, 0, 0, canvas.width, canvas.height);
+                ctx.drawImage(seaVideo, 0, 0, canvas.clientWidth, canvas.clientHeight);
             }
             
             ctx.restore();
