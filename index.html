@@ -541,9 +541,13 @@ let customContentURL = null;
 let frameCount = 0;
 let isRunning = false;
 // 摄像头绘制参数（保持原始比例不变形）
-let camDrawParams = { offsetX: 0, offsetY: 0, width: 0, height: 0, scale: 1 };
+let camDrawParams = { offsetX: 0, offsetY: 0, width: 0, height: 0, scaleX: 1, scaleY: 1 };
 // 屏幕像素比（用于超清截图）
 const dpr = window.devicePixelRatio || 1;
+
+// 开启最高质量绘制
+ctx.imageSmoothingEnabled = true;
+ctx.imageSmoothingQuality = 'high';
 
 // 生成首页卡片
 function buildCards(){
@@ -687,13 +691,17 @@ $('#btnScreenshot').onclick = ()=>{
     tempCanvas.height = canvas.height;
     const tempCtx = tempCanvas.getContext('2d');
     
+    // 开启最高质量
+    tempCtx.imageSmoothingEnabled = true;
+    tempCtx.imageSmoothingQuality = 'high';
+    
     // 复制当前canvas内容
     tempCtx.drawImage(canvas, 0, 0);
     
-    // 导出高清PNG
+    // 导出最高质量PNG
     const link = document.createElement('a');
     link.download = '海的信箱-' + new Date().getTime() + '.png';
-    link.href = tempCanvas.toDataURL('image/png', 1.0); // 最高质量
+    link.href = tempCanvas.toDataURL('image/png', 1.0);
     link.click();
 };
 
@@ -760,11 +768,15 @@ function goHome(){
     isModelLoaded = false;
 }
 
-// 启动摄像头
+// 启动摄像头（1280x720高清分辨率）
 async function startCamera(){
     try {
         mediaStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user', width:640, height:480 }
+            video: { 
+                facingMode: 'user', 
+                width: { ideal: 1280 }, 
+                height: { ideal: 720 }
+            }
         });
         camVideo.srcObject = mediaStream;
         await camVideo.play();
@@ -807,12 +819,12 @@ function toggleCamera(){
     }
 }
 
-// ---------- 核心：修复比例变形+超清分辨率 ----------
-// 计算摄像头绘制参数（保持原始4:3比例，不变形）
+// ---------- 核心：极致贴合+超高灵敏度 ----------
+// 计算摄像头绘制参数（保持原始比例不变形）
 function updateCamDrawParams() {
     if(!camVideo.videoWidth || !camVideo.videoHeight) return;
     
-    // 摄像头原始比例（通常是4:3）
+    // 摄像头原始比例
     const videoRatio = camVideo.videoWidth / camVideo.videoHeight;
     // 画布CSS尺寸
     const canvasCssWidth = canvas.clientWidth;
@@ -838,7 +850,7 @@ function updateCamDrawParams() {
     camDrawParams.scaleY = camDrawParams.height / camVideo.videoHeight;
 }
 
-// 初始化手势模型
+// 初始化手势模型（超高灵敏度）
 async function initHandGesture(){
     if (typeof Hands === 'undefined') {
         console.error("MediaPipe Hands 未加载");
@@ -853,12 +865,12 @@ async function initHandGesture(){
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`
         });
         
-        // 最优灵敏度参数
+        // 超高灵敏度参数
         handsModel.setOptions({
             maxNumHands: 2,
             modelComplexity: 0, // 轻量级模型，速度最快
-            minDetectionConfidence: 0.12, // 最优检测阈值
-            minTrackingConfidence: 0.12 // 最优追踪阈值
+            minDetectionConfidence: 0.08, // 极低检测阈值
+            minTrackingConfidence: 0.08 // 极低追踪阈值
         });
         
         handsModel.onResults(onHandResults);
@@ -877,7 +889,7 @@ async function initHandGesture(){
     }
 }
 
-// 处理手部关键点：修复坐标映射（适配比例调整）
+// 处理手部关键点：极致贴合手指
 function onHandResults(results){
     // 空值保护，防止闪退
     if(!results || !results.multiHandLandmarks) {
@@ -907,7 +919,7 @@ function onHandResults(results){
         return { x: canvasX, y: canvasY };
     };
 
-    // 情况1：单只手框选（完美贴合）
+    // 情况1：单只手框选（极致贴合）
     if(hands.length === 1){
         const landmarks = hands[0];
         const thumbTip = landmarks[4];
@@ -919,16 +931,16 @@ function onHandResults(results){
             thumbTip.y - indexTip.y
         );
 
-        // 最优触发距离
-        if(fingerDist > 0.012){
+        // 极低触发距离，手指轻轻张开就有反应
+        if(fingerDist > 0.008){
             const thumbPoint = mapPoint(thumbTip);
             const indexPoint = mapPoint(indexTip);
             
-            // 完美贴合手指
+            // 关键优化：放大系数1.05倍，几乎和手指完全重合
             const centerX = (thumbPoint.x + indexPoint.x) / 2;
             const centerY = (thumbPoint.y + indexPoint.y) / 2;
-            const width = Math.abs(thumbPoint.x - indexPoint.x) * 1.2;
-            const height = Math.abs(thumbPoint.y - indexPoint.y) * 1.2;
+            const width = Math.abs(thumbPoint.x - indexPoint.x) * 1.05;
+            const height = Math.abs(thumbPoint.y - indexPoint.y) * 1.05;
             
             selectRect = {
                 x: Math.max(0, centerX - width/2),
@@ -960,8 +972,8 @@ function onHandResults(results){
         const width = maxX - minX;
         const height = maxY - minY;
         
-        // 最优最小尺寸要求
-        if(width > 15 && height > 15){
+        // 极低最小尺寸要求
+        if(width > 10 && height > 10){
             selectRect = {
                 x: minX,
                 y: minY,
@@ -974,7 +986,7 @@ function onHandResults(results){
     }
 }
 
-// 主循环：超清分辨率+完美比例
+// 主循环：智能渲染+超清画质
 async function mainLoop() {
     if(!isRunning) return;
     
@@ -988,7 +1000,7 @@ async function mainLoop() {
         // 更新摄像头绘制参数
         updateCamDrawParams();
         
-        // 1. 绘制摄像头画面（保持原始4:3比例，不变形）
+        // 1. 绘制摄像头画面（保持原始比例不变形）
         if(isCamReady && camVideo.readyState >= 2){
             ctx.save();
             ctx.drawImage(camVideo, 
@@ -997,9 +1009,11 @@ async function mainLoop() {
             ctx.restore();
         }
         
-        // 2. 智能帧节流：每2帧处理一次手势，大幅提升流畅度
+        // 2. 智能帧节流：有手时每帧处理，没手时每3帧处理一次
         frameCount++;
-        if(frameCount % 2 === 0 && handsModel && isModelLoaded && isCamReady) {
+        const processFrame = selectRect ? true : (frameCount % 3 === 0);
+        
+        if(processFrame && handsModel && isModelLoaded && isCamReady) {
             await handsModel.send({ image: camVideo });
         }
         
