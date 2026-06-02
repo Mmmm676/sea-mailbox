@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+    <!-- CSP元标签必须放在最顶部，强制覆盖服务器端设置 -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdn.pixabay.com https://picsum.photos; img-src 'self' data: blob: https:; media-src 'self' blob: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob:;">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>海的信箱 · 隔空手框海景</title>
@@ -98,7 +100,6 @@
             backdrop-filter: blur(10px);
             -webkit-backdrop-filter: blur(10px);
             cursor: pointer;
-            /* 卡片动画减速：从0.4s改为0.8s */
             transition: all 0.8s cubic-bezier(0.25, 0.8, 0.25, 1.2);
             box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
             overflow: hidden;
@@ -539,6 +540,8 @@ let customContentURL = null;
 // 性能优化：帧节流
 let frameCount = 0;
 let isRunning = false;
+// 摄像头绘制参数（保持比例不变形）
+let camDrawParams = { offsetX: 0, offsetY: 0, width: 0, height: 0 };
 
 // 生成首页卡片
 function buildCards(){
@@ -792,7 +795,30 @@ function toggleCamera(){
     }
 }
 
-// ---------- 核心：优化后的手势识别系统 ----------
+// ---------- 核心：修复比例变形+手势坐标映射 ----------
+// 计算摄像头绘制参数（保持原始比例，不变形）
+function updateCamDrawParams() {
+    if(!camVideo.videoWidth || !camVideo.videoHeight) return;
+    
+    const videoRatio = camVideo.videoWidth / camVideo.videoHeight;
+    const canvasRatio = canvas.width / canvas.height;
+    
+    if(videoRatio > canvasRatio) {
+        // 摄像头更宽，高度填满，宽度裁剪
+        camDrawParams.height = canvas.height;
+        camDrawParams.width = canvas.height * videoRatio;
+        camDrawParams.offsetX = (canvas.width - camDrawParams.width) / 2;
+        camDrawParams.offsetY = 0;
+    } else {
+        // 摄像头更高，宽度填满，高度裁剪
+        camDrawParams.width = canvas.width;
+        camDrawParams.height = canvas.width / videoRatio;
+        camDrawParams.offsetX = 0;
+        camDrawParams.offsetY = (canvas.height - camDrawParams.height) / 2;
+    }
+}
+
+// 初始化手势模型
 async function initHandGesture(){
     if (typeof Hands === 'undefined') {
         console.error("MediaPipe Hands 未加载");
@@ -831,7 +857,7 @@ async function initHandGesture(){
     }
 }
 
-// 处理手部关键点：优化贴合度
+// 处理手部关键点：修复坐标映射
 function onHandResults(results){
     // 空值保护，防止闪退
     if(!results || !results.multiHandLandmarks) {
@@ -845,10 +871,21 @@ function onHandResults(results){
         return;
     }
 
-    const mapPoint = (pt) => ({
-        x: (1 - pt.x) * canvas.width,
-        y: pt.y * canvas.height
-    });
+    // 坐标映射：将MediaPipe归一化坐标转换为画布坐标（考虑比例和偏移）
+    const mapPoint = (pt) => {
+        // 先转换为摄像头像素坐标
+        const videoX = pt.x * camVideo.videoWidth;
+        const videoY = pt.y * camVideo.videoHeight;
+        
+        // 再转换为画布像素坐标
+        let canvasX = (videoX / camVideo.videoWidth) * camDrawParams.width + camDrawParams.offsetX;
+        let canvasY = (videoY / camVideo.videoHeight) * camDrawParams.height + camDrawParams.offsetY;
+        
+        // 镜像翻转
+        canvasX = canvas.width - canvasX;
+        
+        return { x: canvasX, y: canvasY };
+    };
 
     // 情况1：单只手框选（优化贴合度）
     if(hands.length === 1){
@@ -874,10 +911,10 @@ function onHandResults(results){
             const height = Math.abs(thumbPoint.y - indexPoint.y) * 1.8;
             
             selectRect = {
-                x: Math.max(0, (centerX - width/2) / canvas.width),
-                y: Math.max(0, (centerY - height/2) / canvas.height),
-                w: Math.min(1, width / canvas.width),
-                h: Math.min(1, height / canvas.height)
+                x: Math.max(0, centerX - width/2),
+                y: Math.max(0, centerY - height/2),
+                w: Math.min(canvas.width, width),
+                h: Math.min(canvas.height, height)
             };
         }else{
             selectRect = null;
@@ -906,10 +943,10 @@ function onHandResults(results){
         // 最优最小尺寸要求
         if(width > 15 && height > 15){
             selectRect = {
-                x: minX / canvas.width,
-                y: minY / canvas.height,
-                w: width / canvas.width,
-                h: height / canvas.height
+                x: minX,
+                y: minY,
+                w: width,
+                h: height
             };
         }else{
             selectRect = null;
@@ -917,7 +954,7 @@ function onHandResults(results){
     }
 }
 
-// 主循环：优化性能，丝滑流畅
+// 主循环：修复摄像头比例变形
 async function mainLoop() {
     if(!isRunning) return;
     
@@ -926,12 +963,15 @@ async function mainLoop() {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
         
-        // 1. 绘制摄像头画面（镜像翻转，符合直觉）
+        // 更新摄像头绘制参数
+        updateCamDrawParams();
+        
+        // 1. 绘制摄像头画面（保持原始比例，不变形）
         if(isCamReady && camVideo.readyState >= 2){
             ctx.save();
-            ctx.translate(canvas.width, 0);
-            ctx.scale(-1, 1);
-            ctx.drawImage(camVideo, 0, 0, canvas.width, canvas.height);
+            ctx.drawImage(camVideo, 
+                camDrawParams.offsetX, camDrawParams.offsetY, 
+                camDrawParams.width, camDrawParams.height);
             ctx.restore();
         }
         
@@ -943,14 +983,9 @@ async function mainLoop() {
         
         // 3. 绘制框选区域的海景（透明无框）
         if(selectRect && selectRect.w > 0.01 && selectRect.h > 0.01){
-            const px = selectRect.x * canvas.width;
-            const py = selectRect.y * canvas.height;
-            const pw = selectRect.w * canvas.width;
-            const ph = selectRect.h * canvas.height;
-
             ctx.save();
             ctx.beginPath();
-            ctx.rect(px, py, pw, ph);
+            ctx.rect(selectRect.x, selectRect.y, selectRect.w, selectRect.h);
             ctx.clip();
             
             // 根据内容类型绘制
@@ -965,7 +1000,7 @@ async function mainLoop() {
             // 完全透明边框，无任何视觉干扰
             ctx.strokeStyle = 'rgba(0, 0, 0, 0)';
             ctx.lineWidth = 0;
-            ctx.strokeRect(px, py, pw, ph);
+            ctx.strokeRect(selectRect.x, selectRect.y, selectRect.w, selectRect.h);
         }
     } catch(e) {
         // 全局错误捕获，彻底防止闪退
